@@ -1,0 +1,243 @@
+---
+title: "esm244_lab9_LB"
+author: "Lydia Bleifuss"
+date: "3/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+
+#If you try to install.packages() a package and it says it does not exist when you know it does, it probably is not available thorugh CRAN so you need to download through GitHub and devtools!! Great tip
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(gt)
+library(boot)
+library(patchwork)
+library(broom)
+library(nlstools)
+library(scales)
+
+```
+
+
+### Fun tables with 'gt'
+
+usig LifeCycleSavings dataset that already exists in R
+```{r}
+#don't convert data to percents, stick wiht decimal notation and then convert to percentage for communicaitons and be very clear in the metedata that it is a percent
+
+#in LifeCycleSavins, the country names are the row names, so we want to convert them into a column
+
+disp_income <- LifeCycleSavings %>% 
+  rownames_to_column() %>% 
+  arrange(dpi) %>% #want to rearange based on dpi (real per capita disposable income), doing this rearranges the dataframe from low to high
+  head(5) %>% #now we just have the top 5
+  mutate(ddpi = ddpi/100,
+         pop15 = pop15/100,
+         pop75 = pop75/100) #because these are in percents, and that could be confusing later, we want to overright back to decimal 
+```
+
+
+### gt is a worthwhile tradeoff, easiest package she has found to do that customization that you want (better than Kable, great GitHub page associated with it, Allsion also had a blog that shows how to customize things in gt)
+
+Now let's make a nice table with 'gt':
+```{r}
+disp_income %>% 
+  gt() %>% #adding customization piece by piece in different layers
+  tab_header(
+    title = "Life cycle savings",
+    subtitle = "5 countires with the lowest per capita disposable income"
+  ) %>% 
+  fmt_currency( #use fmt_ and there are a lot of different great options! Such as currency, scientific notation, percent etc etc
+    columns = vars(dpi),
+    decimals = 2
+  ) %>% 
+  fmt_percent( #we bundled these, but you could put them in different fmt_percents to have different decimal places, etc. 
+    columns = vars(pop15, pop75, ddpi),
+    decimals = 1
+  ) %>% 
+  tab_options(
+    table.width = pct(80)
+  ) %>% 
+  tab_footnote( # you get to specify what piece of your table the footnote is associated with!
+    footnote = "Data averaged from 1970 - 1980",
+    location = cells_title()
+  ) %>% 
+  data_color(
+    columns = vars(dpi), # I would like the colords in the dpi column to depend on that value
+    colors = scales::col_numeric(
+      palette = c("orange","red","purple"),
+      domain = c(88, 190)
+    )
+  ) %>% 
+  cols_label(
+    sr = "Savings ratio",
+    pop15 = "Pop 15!" #can keep adding column names from here 
+  )
+```
+
+
+### Bootstrap the confidence interval for salinity
+
+```{r}
+### if you type "data()" into the Console, you can see all of the datasets you can call from R! amazing. 
+#Base plot funtions are really useful 
+
+hist(salinity$sal) #dataframe$column
+
+ggplot(data = salinity, aes(sample = sal)) +
+  geom_qq() #hmm looks close to linear, but with this number of observations it's hard to say...
+
+# IF I believe based on a single sample of n = 28 that a t-distribution describes the sampling distribituion! 
+t.test(salinity$sal) 
+# based on this run, I expect that in 95% of sample that I draw from the population, in 95/100 CI I calculate, the population parameter will fall w/in   9.386351 11.720792
+
+#BUT I really want to compare this by using bootstrapping to find a sampling distribution based on my data, instead of based entirenly on assumpitons. 
+
+```
+
+
+Creat a function to calculate the mean of different bootstrap samples:
+```{r}
+mean_fun <- function(x,i){mean(x[i])}
+
+sal_nc <- salinity$sal
+
+#set.seed(5002) #you can set seed to seed to test with collaborators to make sure we see same results  
+
+salboot_100 <- boot(data = sal_nc,
+                    statistic = mean_fun,
+                    R = 100)
+
+salboot_10k <- boot(data = sal_nc,
+                    statistic = mean_fun,
+                    R = 10000)
+
+# to look at this, typle salboot_100 in Console
+#original = mean value
+
+#can call sallboot_100$t to see the actual values (the t is the mean)
+
+# I want to pull means for each of the bootstrap samples and plot a histogram, then great!
+
+salboot_100_df <- data.frame(bs_mean = salboot_100$t) #just created a df that pulls all the means from this bootstrap 
+salboot_10k_df <- data.frame(bs_mean = salboot_10k$t) 
+
+# Now let's plot the bootstrapped sampling distribution: 
+p1 <- ggplot(data = salinity, aes(x = sal)) +
+  geom_histogram()
+
+p2 <- ggplot(data = salboot_100_df, aes(x = bs_mean)) +
+  geom_histogram()
+
+p3 <- ggplot(data = salboot_10k_df, aes(x = bs_mean)) +
+  geom_histogram()
+
+# Using the 'patchwork': package
+
+p1 + p2 + p3 #the plus means that we want things horizontally arranged into a row (this is NOT facet wrap) 
+
+p1 + p2 / p3 #use a devide sign to have things vertically structured
+
+(p1 + p2) / p3 #AMAZING!!!
+
+#options to add text, etc etc 
+
+
+#KEEP IN MIND, you can MAKE YOUR OWN THEME (look at code for theme_minimal and update!!)
+#Datat imagineist (data.patchwork.imaginist.com)!!! Guides for different features, adding empy space, controling grids, AMAZING
+
+
+#JOIN TWITTER
+
+#r stats 
+##rstats
+#maraabricksdatahandle
+#thomas lin perdersen 
+#follow him and everyone who works for r studio
+#allison horst
+#whole book that is twitter for r programers (Twitter for R programmers) #can also follow tidy tuesday (T for R Stats .com)
+#tiddytuesday
+#ian bell
+```
+
+
+```{r}
+boot.ci(salboot_10k, conf = 0.95)
+```
+
+### Example: nonlinear least squares 
+
+```{r}
+df <- read_csv(here("data","log_growth.csv"))
+
+ggplot(data = df, aes(x = time, y = log(pop))) + #log transform this, which shows the slope of teh linear component on the log(pop) component
+  geom_point()
+```
+
+
+```{r}
+df_exp <- df %>% 
+  filter(time < 15) %>% 
+  mutate(ln_pop = log(pop)) #the slope should be an estimate of the growth rate constant ->
+
+lm_k <- lm(ln_pop ~ time, data = df_exp)
+# lm_k
+# Estimate: growht rate = 0.17 
+# K = 180
+# A = 18
+```
+
+Now, NLS:
+```{r}
+df_nls <- nls(pop ~ K/(1 + A*exp(-r*time)),  #this can be any equation that you think is reasonable in describing the relationship (in this case the logistic growth equation)
+                data = df, 
+              start = list(K = 180, A = 18, r = 0.17), #nls needs a starting estime (start)
+              trace = TRUE) #Trace is optional but it is helpful to see how close your original estimates were and how many steps it needs to take to reduce until it can't reduce no more 
+
+#Value in the left column is the r qured sum of the residuals, and it is going down because R is trying to reduce this 
+
+summary(df_nls)
+
+model_out <- broom::tidy(df_nls)
+model_out 
+```
+
+```{r}
+#want to create a sequence that encapsulated all the time that is in df
+
+t_seq <- seq (from = 0, to = 35, length = 200) #creating values that range from 0-35 that has 200 values in between 
+
+#t_seq
+
+
+#Now make predictions from our NLS model, using that new sequence of times:
+
+p_predict <- predict(df_nls, newdata = t_seq)  #K, A, and r are constants in the model that we foudn and the only variable is time! 
+
+p_predict #estimates for every time that existsin t_seq , the estimate for what the population is 
+
+
+#Bind together my time and prediciton data:
+
+df_complete <- data.frame(df, p_predict) #can only combine if they are the same length 
+
+
+ggplot(data = df_complete, aes(x = time, y = pop)) +
+  geom_point() +
+  geom_line(aes(x = time, y = p_predict)) +
+  theme_minimal()
+```
+
+
+```{r}
+df_ci <- confint2(df_nls)
+df_ci
+```
+
+If you know the overall structural relationship between different htings in teh environment but not the parameters, I'll give you the data and you tell me what the parameters are! 
